@@ -1,0 +1,28 @@
+scope: postgres-cluster
+name: replica
+
+restapi:
+  listen: 0.0.0.0:8009
+  connect_address: patroni-replica:8009
+
+etcd:
+  host: http://etcd:2379
+
+postgresql:
+  listen: 0.0.0.0:5432
+  connect_address: patroni-replica:5432
+  data_dir: /var/lib/postgresql/data
+  bin_dir: /usr/lib/postgresql/17.0/bin
+  authentication:
+    superuser:
+      username: postgres
+      password: postgres
+    replication:
+      username: replicator
+      password: replicator_password
+  parameters:
+    max_connections: 100
+    shared_buffers: 256MB
+  pg_hba:
+    - host replication replicator all md5
+    - host all all 0.0.0.0/0 md5

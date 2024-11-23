@@ -1,0 +1,46 @@
+scope: postgres-cluster
+name: primary
+
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: patroni-primary:8008
+
+etcd:
+  host: http://etcd:2379
+
+bootstrap:
+  dcs:
+    loop_wait: 10
+    retry_timeout: 10
+    ttl: 30
+    postgresql:
+      use_pg_rewind: true
+      parameters:
+        max_connections: 100
+        shared_buffers: 256MB
+        wal_level: replica
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+  users:
+    admin:
+      password: admin_password
+      options:
+        - createrole
+        - createdb
+
+postgresql:
+  listen: 0.0.0.0:5432
+  connect_address: patroni-primary:5432
+  data_dir: /var/lib/postgresql/data
+  bin_dir: /usr/lib/postgresql/17.0/bin
+  authentication:
+    superuser:
+      username: postgres
+      password: postgres
+    replication:
+      username: replicator
+      password: replicator_password
+  pg_hba:
+    - host replication replicator all md5
+    - host all all 0.0.0.0/0 md5

@@ -1,0 +1,16 @@
+# percona for backup --- done
+# patroni --- done
+# try to stop replica and see that it refresh state --- done
+# pg_tuner --- done
+
+# apache vs nginx --- done
+# varnish --- done
+# simulate drop of service for nginx --- done
+# static ip for docker service --- done
+# network with ip range --- done
+
+# CDN --- done
+
+# dockerized sert bot
+
+# Jenkins

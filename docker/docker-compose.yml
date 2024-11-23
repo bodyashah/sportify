@@ -1,0 +1,261 @@
+services:
+
+  test_db:
+    container_name: test_db
+    image: postgres:16.4
+    environment:
+      POSTGRES_USER: playground
+      POSTGRES_PASSWORD: playground
+      POSTGRES_DB: database
+      PGDATA: /var/lib/postgresql/data
+    ports:
+      - 5432:5432
+    restart: unless-stopped
+
+  user_db:
+    container_name: user_db
+    image: postgres:16.4
+    env_file:
+      - ../.backup/.env # default no need to specify
+    environment:
+      POSTGRES_USER: ${USER_SERVICE_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${USER_SERVICE_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${USER_SERVICE_POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+#      - ./databases/user/postgresql/data:/var/lib/postgresql/data
+      - user_service_db_volume:/var/lib/postgresql/data
+    networks:
+      - sportify-network
+    restart: unless-stopped
+
+  central_db:
+    container_name: central_db
+    image: postgres:16.4
+    env_file:
+      - ../.backup/.env # default no need to specify
+    environment:
+      POSTGRES_USER: ${CENTRAL_DB_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${CENTRAL_DB_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${CENTRAL_DB_POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+#      - ./.data/databases/central/postgresql/data:/var/lib/postgresql/data
+      - central_db_volume:/var/lib/postgresql/data
+    networks:
+      - sportify-network
+    restart: unless-stopped
+
+  redis_cache:
+    container_name: redis_cache
+    image: redis:7.4
+    env_file:
+      - ../.backup/.env # default no need to specify
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_USER: ${REDIS_USER}
+      REDIS_USER_PASSWORD: ${REDIS_USER_PASSWORD}
+    ports:
+      - 6380:6379
+    volumes:
+      - redis_cache_volume:/data
+    networks:
+      - sportify-network
+    restart: unless-stopped
+    command: >
+      sh -c '
+        mkdir -p /usr/local/etc/redis &&
+        echo "bind 0.0.0.0" > /usr/local/etc/redis/redis.conf &&
+        echo "requirepass ${REDIS_PASSWORD}" >> /usr/local/etc/redis/redis.conf &&
+        echo "appendonly yes" >> /usr/local/etc/redis/redis.conf &&
+        echo "appendfsync everysec" >> /usr/local/etc/redis/redis.conf &&
+        echo "user ${REDIS_USER} on >${REDIS_USER_PASSWORD} ~* +@all" >> /usr/local/etc/redis/users.acl &&
+        redis-server /usr/local/etc/redis/redis.conf
+      '
+  
+  zookeeper:
+    container_name: zookeeper
+    image: bitnami/zookeeper:3.9.2
+    ports:
+      - 2181:2181
+    env_file:
+      - ../.backup/.env
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=${ZOOKEEPER_ALLOW_ANONYMOUS_LOGIN}
+    volumes:
+      - zookeeper_data_volume:/var/lib/zookeeper/data
+      - zookeeper_log_volume:/var/lib/zookeeper/log
+    networks:
+      - sportify-network
+    restart: unless-stopped
+
+  kafka:
+    container_name: kafka
+    image: bitnami/kafka:3.5.2
+    ports:
+      - 9092:9092
+    env_file:
+      - ../.backup/.env
+    environment:
+      - KAFKA_BROKER_ID=${KAFKA_BROKER_ID}
+      - KAFKA_CFG_LISTENERS=${KAFKA_CFG_LISTENERS}
+      - KAFKA_CFG_ADVERTISED_LISTENERS=${KAFKA_CFG_ADVERTISED_LISTENERS}
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=${KAFKA_CFG_ZOOKEEPER_CONNECT}
+      - ALLOW_PLAINTEXT_LISTENER=${KAFKA_ALLOW_PLAINTEXT_LISTENER}
+    volumes:
+      - kafka_data_volume:/var/lib/kafka/data
+    networks:
+      - sportify-network
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+
+  mongodb:
+    container_name: mongodb
+    image: mongo:7.0.14-rc0-jammy
+    ports:
+      - 27017:27017
+    env_file:
+      - ../.backup/.env
+    environment:
+      - MONGO_INITDB_DATABASE=${MONGO_INITDB_DATABASE}
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD}
+    volumes:
+      - mongo_db_volume:/data/db
+      - mongo_config_volume:/data/configdb
+    networks:
+      - sportify-network
+    restart: unless-stopped
+
+  user_service:
+    container_name: user_service
+    build:
+      context: ../user-service
+      dockerfile: ./Dockerfile
+    ports:
+      - 8080:8080
+    environment:
+      SPRING_PROFILES_ACTIVE: ${USER_SERVICE_SPRING_ACTIVE_PROFILE}
+    networks:
+      - sportify-network
+    restart: always
+    depends_on:
+      - user_db
+#      - kafka
+
+  event_service:
+    container_name: event_service
+    build:
+      context: ../event-service
+      dockerfile: ./Dockerfile
+    ports:
+      - 8081:8081
+    environment:
+      SPRING_PROFILES_ACTIVE: ${EVENT_SERVICE_SPRING_ACTIVE_PROFILE}
+    networks:
+      - sportify-network
+    restart: always
+    depends_on:
+      - redis_cache
+      - central_db
+      - kafka
+
+  participant_service:
+    container_name: participant_service
+    build:
+      context: ../participant-service
+      dockerfile: ./Dockerfile
+    ports:
+      - 8082:8082
+    environment:
+      SPRING_PROFILES_ACTIVE: ${PARTICIPANT_SERVICE_SPRING_ACTIVE_PROFILE}
+    networks:
+      - sportify-network
+    restart: always
+    depends_on:
+      - central_db
+      - kafka
+
+  notification_service:
+    container_name: notification_service
+    build:
+      context: ../notification-service
+      dockerfile: ./Dockerfile
+    ports:
+      - 8083:8083
+    environment:
+      SPRING_PROFILES_ACTIVE: ${NOTIFICATION_SERVICE_SPRING_ACTIVE_PROFILE}
+    networks:
+      - sportify-network
+    restart: always
+    depends_on:
+      - kafka
+      - mongodb
+
+  score_service:
+    container_name: score_service
+    build:
+      context: ../score-service
+      dockerfile: ./Dockerfile
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SCORE_SERVICE_SPRING_ACTIVE_PROFILE}
+    networks:
+      sportify-network:
+        ipv4_address: 192.168.1.10
+    restart: always
+
+  score_service_2:
+    container_name: score_service_2
+    build:
+      context: ../score-service
+      dockerfile: ./Dockerfile
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SCORE_SERVICE_SPRING_ACTIVE_PROFILE}
+    networks:
+      sportify-network:
+        ipv4_address: 192.168.1.11
+    restart: always
+
+  score_service_3:
+    container_name: score_service_3
+    build:
+      context: ../score-service
+      dockerfile: ./Dockerfile
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SCORE_SERVICE_SPRING_ACTIVE_PROFILE}
+    networks:
+      sportify-network:
+        ipv4_address: 192.168.1.12
+    restart: always
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - 80:80
+    networks:
+      - sportify-network
+    depends_on:
+      - score_service
+      - score_service_2
+      - score_service_3
+
+networks:
+  sportify-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.1.0/24
+
+volumes:
+  user_service_db_volume:
+  central_db_volume:
+  redis_cache_volume:
+  zookeeper_data_volume:
+  zookeeper_log_volume:
+  kafka_data_volume:
+  mongo_db_volume:
+  mongo_config_volume:

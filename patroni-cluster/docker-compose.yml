@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.4
+    container_name: etcd
+    environment:
+      - ETCD_NAME=etcd-node
+      - ETCD_INITIAL_CLUSTER_STATE=new
+      - ETCD_INITIAL_CLUSTER=etcd-node=http://etcd:2380
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://etcd:2380
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd:2379
+      - ETCD_ENABLE_V2=true
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+    networks:
+      - patroni-network
+
+  patroni-primary:
+    image: ongres/patroni:latest
+    container_name: patroni-primary
+    environment:
+      PATRONI_SCOPE: postgres-cluster
+      PATRONI_NAME: primary
+      PATRONI_ETCD_URL: http://etcd:2379
+      PATRONI_RESTAPI_LISTEN: 0.0.0.0:8008
+      PATRONI_RESTAPI_CONNECT_ADDRESS: patroni-primary:8008
+      PATRONI_POSTGRESQL_LISTEN: 0.0.0.0:5432
+      PATRONI_POSTGRESQL_CONNECT_ADDRESS: patroni-primary:5432
+    volumes:
+      - ./patroni-primary.yml:/config/patroni.yml
+      - ./postgresql-run:/run/postgresql
+    ports:
+      - "5432:5432"
+      - "8008:8008"
+    command: ["patroni", "/config/patroni.yml"]
+    networks:
+      - patroni-network
+    depends_on:
+      - etcd
+
+  patroni-replica:
+    image: ongres/patroni:latest
+    container_name: patroni-replica
+    environment:
+      PATRONI_SCOPE: postgres-cluster
+      PATRONI_NAME: replica
+      PATRONI_ETCD_URL: http://etcd:2379
+      PATRONI_RESTAPI_LISTEN: 0.0.0.0:8009
+      PATRONI_RESTAPI_CONNECT_ADDRESS: patroni-replica:8009
+      PATRONI_POSTGRESQL_LISTEN: 0.0.0.0:5432
+      PATRONI_POSTGRESQL_CONNECT_ADDRESS: patroni-replica:5432
+    volumes:
+      - ./patroni-replica.yml:/config/patroni.yml
+      - ./postgresql-run:/run/postgresql
+    ports:
+      - "5433:5432"
+      - "8009:8009"
+    command: ["patroni", "/config/patroni.yml"]
+    networks:
+      - patroni-network
+    depends_on:
+      - etcd
+      - patroni-primary
+
+networks:
+  patroni-network:
+    driver: bridge
